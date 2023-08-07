@@ -12,6 +12,14 @@ from tinygrad.runtime.ops_hip import RawHIPBuffer, HIPProgram
 # KY=2 KX=2 N=2048 python3 extra/gemm/hip_matmul.py
 #   4194304    502.57 us, would be  34184.30 GFLOPS matmul, 100.15 GB/s
 
+
+# Research notes and helpful links:
+# https://www.exascaleproject.org/wp-content/uploads/2017/05/ORNL_HIP_webinar_20190606_final.pdf
+# https://gpuopen.com/learn/wmma_on_rdna3/
+# https://www.amd.com/system/files/TechDocs/rdna3-shader-instruction-set-architecture-feb-2023_0.pdf
+# https://github.com/ROCmSoftwarePlatform/rocWMMA/blob/d7c36fda9ea80d1d13bc133a23c6fc5152d1c2e0/samples/perf_hgemm.cpp
+# https://releases.llvm.org/10.0.0/docs/AMDGPUUsage.html
+
 N = getenv("N", 64)
 KX = getenv("KX", 1)
 KY = getenv("KY", 1)
@@ -26,6 +34,30 @@ nb = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32).astyp
 nc = np.random.default_rng().standard_normal(size=(N,N), dtype=np.float32).astype(np.float16)
 b = RawHIPBuffer.fromCPU(nb)
 c = RawHIPBuffer.fromCPU(nc)
+
+optimized_prog = HIPProgram("wmma", f"""
+typedef _Float16 half16 __attribute__((ext_vector_type(16)));
+extern "C" __global__ void wmma(const float const* a, const float const* b, const float* c) {{
+
+const lIdx = threadIdx.x;
+// thread lane as needed for the wmma intrinsics
+const lane = lIdx%16;
+
+// a single wavefront can share 16 columns of A and 16 rows of B
+
+HIP_DYNAMIC_SHARED(half16, a_frag)
+HIP_DYNAMIC_SHARED(half16, b_frag)
+// NOTE: maybe this should not be shared
+HIP_DYNAMIC_SHARED(half16, c_frag)
+
+// load relevant rows
+
+// per 
+
+
+}}
+
+""");
 
 prog = HIPProgram("test", f"""
 typedef float float8 __attribute__((ext_vector_type(8)));
@@ -50,8 +82,6 @@ extern "C" __global__ void test(float* c, __half* a, __half* b) {{
       for (int x = 0; x < {KX}; x++) {{
         a_frag[x][ele] = a[{N}*lane + (k+ele) + x*{16*N}];
       }}
-    /*}}
-    for (int ele = 0; ele < 16; ++ele) {{*/
       for (int y = 0; y < {KY}; y++) {{
         b_frag[y][ele] = b[(k+ele)*{N} + lane + y*16];
       }}
